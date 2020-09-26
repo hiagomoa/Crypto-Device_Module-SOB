@@ -8,12 +8,12 @@
  * must be called /dev/ebbchar.
  * @see http://www.derekmolloy.ie/ for a full description and follow-up descriptions.
 */
-#include<stdio.h>
-#include<stdlib.h>
-#include<errno.h>
-#include<fcntl.h>
-#include<string.h>
-#include<unistd.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <string.h>
+#include <unistd.h>
 
 #define BUFFER_LENGTH 256               ///< The buffer length (crude but fine)
 static char receive[BUFFER_LENGTH];     ///< The receive buffer from the LKM
@@ -29,7 +29,9 @@ int main(){
    }
    printf("Type in a short string to send to the kernel module:\n");
    scanf("%[^\n]%*c", stringToSend);              // Read in a string (with spaces)
-   printf("Writing message to the device [%s].\n", stringToSend);
+   printf("Writing message to the device [%s](%d).\n", stringToSend,strlen(stringToSend));
+   stringToSend[strlen(stringToSend)]='\0';
+
    ret = write(fd, stringToSend, strlen(stringToSend)); // Send the string to the LKM
    if (ret < 0){
       perror("Failed to write the message to the device.");

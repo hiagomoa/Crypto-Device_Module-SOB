@@ -1,49 +1,80 @@
 /**
- * @file   ebbcharmutex.c
+ * @file   ebbchar.c
  * @author Derek Molloy
  * @date   7 April 2015
  * @version 0.1
- * @brief  An introductory character driver to support the second article of my series on
+ * @brief   An introductory character driver to support the second article of my series on
  * Linux loadable kernel module (LKM) development. This module maps to /dev/ebbchar and
  * comes with a helper C program that can be run in Linux user space to communicate with
- * this the LKM. This version has mutex locks to deal with synchronization problems.
+ * this the LKM.
  * @see http://www.derekmolloy.ie/ for a full description and follow-up descriptions.
-*/
-
+ */
+#include <linux/mutex.h>
 #include <linux/init.h>           // Macros used to mark up functions e.g. __init __exit
 #include <linux/module.h>         // Core header for loading LKMs into the kernel
 #include <linux/device.h>         // Header to support the kernel Driver Model
 #include <linux/kernel.h>         // Contains types, macros, functions for the kernel
 #include <linux/fs.h>             // Header for the Linux file system support
 #include <linux/uaccess.h>          // Required for the copy to user function
-#include <linux/mutex.h>	  // Required for the mutex functionality
 #define  DEVICE_NAME "ebbchar"    ///< The device will appear at /dev/ebbchar using this value
 #define  CLASS_NAME  "ebb"        ///< The device class -- this is a character device driver
+
+#include <linux/moduleparam.h>
+#include <linux/stat.h>
+#include <linux/string.h>
+
+//#include <stdint.h>
+/* Skcipher kernel crypto API */
+#include <crypto/skcipher.h>
+/* Scatterlist manipulation */
+#include <linux/scatterlist.h>
+
+/* Error macros */
+#include <linux/err.h>
+/* hash*/
+#include <crypto/internal/hash.h>
+#include <linux/crypto.h>
+
+struct skcipher_def {
+    struct scatterlist sg;
+    struct crypto_skcipher *tfm;
+    struct skcipher_request *req;
+    struct crypto_wait wait;
+};
+
+
+static char *keyp = "";
+module_param(keyp, charp, 0000);
+MODULE_PARM_DESC(keyp, "A character string");
+
+static char *iv = "";
+module_param(iv, charp, 0000);
+MODULE_PARM_DESC(iv, "A character string");
+
+
+
 
 MODULE_LICENSE("GPL");            ///< The license type -- this affects available functionality
 MODULE_AUTHOR("Derek Molloy");    ///< The author -- visible when you use modinfo
 MODULE_DESCRIPTION("A simple Linux char driver for the BBB");  ///< The description -- see modinfo
 MODULE_VERSION("0.1");            ///< A version number to inform users
 
-static int    majorNumber;                  ///< Store the device number -- determined automatically
+static int    majorNumber;                  ///< Stores the device number -- determined automatically
 static char   message[256] = {0};           ///< Memory for the string that is passed from userspace
 static short  size_of_message;              ///< Used to remember the size of the string stored
 static int    numberOpens = 0;              ///< Counts the number of times the device is opened
 static struct class*  ebbcharClass  = NULL; ///< The device-driver class struct pointer
 static struct device* ebbcharDevice = NULL; ///< The device-driver device struct pointer
 
-static DEFINE_MUTEX(ebbchar_mutex);	    ///< Macro to declare a new mutex
-
-/// The prototype functions for the character driver -- must come before the struct definition
+// The prototype functions for the character driver -- must come before the struct definition
 static int     dev_open(struct inode *, struct file *);
 static int     dev_release(struct inode *, struct file *);
 static ssize_t dev_read(struct file *, char *, size_t, loff_t *);
 static ssize_t dev_write(struct file *, const char *, size_t, loff_t *);
 
-/**
- * Devices are represented as file structure in the kernel. The file_operations structure from
- * /linux/fs.h lists the callback functions that you wish to associated with your file operations
- * using a C99 syntax structure. char devices usually implement open, read, write and release calls
+/** @brief Devices are represented as file structure in the kernel. The file_operations structure from
+ *  /linux/fs.h lists the callback functions that you wish to associated with your file operations
+ *  using a C99 syntax structure. char devices usually implement open, read, write and release calls
  */
 static struct file_operations fops =
 {
@@ -52,17 +83,84 @@ static struct file_operations fops =
    .write = dev_write,
    .release = dev_release,
 };
-
+static DEFINE_MUTEX(ebbchar_mutex);
 /** @brief The LKM initialization function
  *  The static keyword restricts the visibility of the function to within this C file. The __init
  *  macro means that for a built-in driver (not a LKM) the function is only used at initialization
  *  time and that it can be discarded and its memory freed up after that point.
  *  @return returns 0 if successful
  */
-static int __init ebbchar_init(void){
-   printk(KERN_INFO "EBBChar: Initializing the EBBChar LKM\n");
 
+ 
+
+static struct shash_desc *config_sdesc(struct crypto_shash *alg, unsigned int *hash_len)
+{
+    
+    struct shash_desc *sdesc;
+    int size;
+    *hash_len=crypto_shash_descsize(alg);
+    size = sizeof(struct shash_desc) + crypto_shash_descsize(alg);
+    sdesc = kmalloc(size, GFP_KERNEL);
+    if (!sdesc)
+        return ERR_PTR(-ENOMEM);
+    sdesc->tfm = alg;
+    sdesc->flags = 0x0;
+    return sdesc;
+}
+
+
+static int calc_hash(struct crypto_shash *alg,
+   const unsigned char *data, unsigned int datalen,
+   unsigned char *digest, unsigned int *hash_len){
+   struct shash_desc *sdesc2;
+   int ret;
+   sdesc2 = config_sdesc(alg,hash_len);
+   
+   if (IS_ERR(sdesc2)) {
+       pr_info("can't alloc sdesc\n");
+       return PTR_ERR(sdesc2);
+   }
+   //ret = crypto_shash_digest(&sdesc->shash, data, datalen, digest);
+   ret = crypto_shash_digest(sdesc2, data, datalen, digest);
+   printk(KERN_INFO "hashj:%s", digest );
+   kfree(sdesc2);
+   return ret;
+}
+
+static int test_hash(const unsigned char *data, unsigned int datalen,
+             unsigned char *digest, unsigned int *hash_len)
+{
+    struct crypto_shash *alg;
+    char *hash_tipo = "sha1";
+    int ret;
+
+    alg = crypto_alloc_shash(hash_tipo, CRYPTO_ALG_TYPE_SHASH, 0);
+    if (IS_ERR(alg)) {
+         pr_info("can't alloc alg %s\n", hash_tipo);
+         return PTR_ERR(alg);
+    }
+    //printk(KERN_INFO "passou");
+    ret = calc_hash(alg, data, datalen, digest,hash_len);
+    crypto_free_shash(alg);
+    return ret;
+}
+
+
+static int __init ebbchar_init(void){
+
+   //size_t len = strlen(plaintext);
+   printk(KERN_INFO "EBBChar: Initializing the EBBChar LKM\n");
+   printk(KERN_INFO "key: %s\n",keyp);
+   printk(KERN_INFO "iv: %s\n",iv );
    // Try to dynamically allocate a major number for the device -- more difficult but worth it
+   //sg_init_one(&sg, plaintext, len);
+   //desc.tfm = crypto_alloc_hash("sha1", 0, CRYPTO_ALG_ASYNC);
+   /*hashh = crypto_alloc_shash( "sha1-padlock-nano", CRYPTO_ALG_TYPE_SHASH , 0 );
+   if (IS_ERR(hashh)) {
+            pr_info("can't alloc alg %s\n", hash_alg_name);
+            return PTR_ERR(alg);
+    }*/
+   //crypto_hash_init(&desc);
    majorNumber = register_chrdev(0, DEVICE_NAME, &fops);
    if (majorNumber<0){
       printk(KERN_ALERT "EBBChar failed to register a major number\n");
@@ -72,36 +170,38 @@ static int __init ebbchar_init(void){
 
    // Register the device class
    ebbcharClass = class_create(THIS_MODULE, CLASS_NAME);
-   if (IS_ERR(ebbcharClass)){           // Check for error and clean up if there is
+   if (IS_ERR(ebbcharClass)){                // Check for error and clean up if there is
       unregister_chrdev(majorNumber, DEVICE_NAME);
       printk(KERN_ALERT "Failed to register device class\n");
-      return PTR_ERR(ebbcharClass);     // Correct way to return an error on a pointer
+      return PTR_ERR(ebbcharClass);          // Correct way to return an error on a pointer
    }
    printk(KERN_INFO "EBBChar: device class registered correctly\n");
 
    // Register the device driver
    ebbcharDevice = device_create(ebbcharClass, NULL, MKDEV(majorNumber, 0), NULL, DEVICE_NAME);
-   if (IS_ERR(ebbcharDevice)){          // Clean up if there is an error
-      class_destroy(ebbcharClass);      // Repeated code but the alternative is goto statements
+   if (IS_ERR(ebbcharDevice)){               // Clean up if there is an error
+      class_destroy(ebbcharClass);           // Repeated code but the alternative is goto statements
       unregister_chrdev(majorNumber, DEVICE_NAME);
       printk(KERN_ALERT "Failed to create the device\n");
       return PTR_ERR(ebbcharDevice);
    }
    printk(KERN_INFO "EBBChar: device class created correctly\n"); // Made it! device was initialized
-   mutex_init(&ebbchar_mutex);          // Initialize the mutex dynamically
+
+   mutex_init(&ebbchar_mutex);
    return 0;
 }
 
 /** @brief The LKM cleanup function
- *  Similar to the initialization function, it is static. The __exit macro notifies that if this
+ *  Similar to the initialization function, it is static. The __exit macro notifi es that if this
  *  code is used for a built-in driver (not a LKM) that this function is not required.
  */
 static void __exit ebbchar_exit(void){
-   mutex_destroy(&ebbchar_mutex);                       // destroy the dynamically-allocated mutex
-   device_destroy(ebbcharClass, MKDEV(majorNumber, 0)); // remove the device
-   class_unregister(ebbcharClass);                      // unregister the device class
-   class_destroy(ebbcharClass);                         // remove the device class
-   unregister_chrdev(majorNumber, DEVICE_NAME);         // unregister the major number
+   
+   mutex_destroy(&ebbchar_mutex);
+   device_destroy(ebbcharClass, MKDEV(majorNumber, 0));     // remove the device
+   class_unregister(ebbcharClass);                          // unregister the device class
+   class_destroy(ebbcharClass);                             // remove the device class
+   unregister_chrdev(majorNumber, DEVICE_NAME);             // unregister the major number
    printk(KERN_INFO "EBBChar: Goodbye from the LKM!\n");
 }
 
@@ -111,10 +211,9 @@ static void __exit ebbchar_exit(void){
  *  @param filep A pointer to a file object (defined in linux/fs.h)
  */
 static int dev_open(struct inode *inodep, struct file *filep){
-
-   if(!mutex_trylock(&ebbchar_mutex)){                  // Try to acquire the mutex (returns 0 on fail)
-	printk(KERN_ALERT "EBBChar: Device in use by another process");
-	return -EBUSY;
+  if(!mutex_trylock(&ebbchar_mutex)){                  // Try to acquire the mutex (returns 0 on fail)
+   printk(KERN_ALERT "EBBChar: Device in use by another process");
+   return -EBUSY;
    }
    numberOpens++;
    printk(KERN_INFO "EBBChar: Device has been opened %d time(s)\n", numberOpens);
@@ -129,31 +228,68 @@ static int dev_open(struct inode *inodep, struct file *filep){
  *  @param len The length of the b
  *  @param offset The offset if required
  */
+char buffer_out[50];
 static ssize_t dev_read(struct file *filep, char *buffer, size_t len, loff_t *offset){
    int error_count = 0;
    // copy_to_user has the format ( * to, *from, size) and returns 0 on success
-   error_count = copy_to_user(buffer, message, size_of_message);
+size_t lenk;
+int rett;
+int j,i;
+ unsigned int hash_len;
+error_count = copy_to_user(buffer, message, size_of_message);
+   
+   switch(buffer[0])
+   {
+   case 'c':
+     
+      break;
+   case 'd':
+      
+      break;
+   case 'h':
+      for(i=size_of_message;i>=0;i--){
+         if(buffer[i]=='(') {
+            buffer[i]='\0';
+            break;
+         }
+      }
+     
+      lenk = strlen(buffer+2);
+      printk(KERN_INFO "buffer:%s (tamanho: %d)", buffer+2,lenk);
+      rett=test_hash(buffer+2,lenk, buffer_out,&hash_len);
+      printk(KERN_INFO "Resposta %d e tamanho:  %d", rett, hash_len);
 
-   if (error_count==0){           // success!
+      j = 0;
+         for (i = 0; i < 20; i++){
+            sprintf(buffer + j, "%02x", buffer_out[i] & 0xff);
+            j += 2;
+         }
+      break;
+   default:
+      break;
+      
+   }
+
+
+   if (error_count==0){            // if true then have success
       printk(KERN_INFO "EBBChar: Sent %d characters to the user\n", size_of_message);
-      return (size_of_message=0); // clear the position to the start and return 0
+      return (size_of_message=0);  // clear the position to the start and return 0
    }
    else {
       printk(KERN_INFO "EBBChar: Failed to send %d characters to the user\n", error_count);
-      return -EFAULT;      // Failed -- return a bad address message (i.e. -14)
+      return -EFAULT;              // Failed -- return a bad address message (i.e. -14)
    }
 }
 
 /** @brief This function is called whenever the device is being written to from user space i.e.
  *  data is sent to the device from the user. The data is copied to the message[] array in this
- *  LKM using message[x] = buffer[x]
+ *  LKM using the sprintf() function along with the length of the string.
  *  @param filep A pointer to a file object
  *  @param buffer The buffer to that contains the string to write to the device
  *  @param len The length of the array of data that is being passed in the const char buffer
  *  @param offset The offset if required
  */
 static ssize_t dev_write(struct file *filep, const char *buffer, size_t len, loff_t *offset){
-
    sprintf(message, "%s(%zu letters)", buffer, len);   // appending received string with its length
    size_of_message = strlen(message);                 // store the length of the stored message
    printk(KERN_INFO "EBBChar: Received %zu characters from the user\n", len);
@@ -166,7 +302,7 @@ static ssize_t dev_write(struct file *filep, const char *buffer, size_t len, lof
  *  @param filep A pointer to a file object (defined in linux/fs.h)
  */
 static int dev_release(struct inode *inodep, struct file *filep){
-   mutex_unlock(&ebbchar_mutex);                      // release the mutex (i.e., lock goes up)
+   mutex_unlock(&ebbchar_mutex);
    printk(KERN_INFO "EBBChar: Device successfully closed\n");
    return 0;
 }
