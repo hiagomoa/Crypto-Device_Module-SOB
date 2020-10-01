@@ -216,7 +216,7 @@ static unsigned int test_skcipher_encdec(struct skcipher_def *sk,
 
 
 /* Initialize and trigger cipher operation */
-static int test_skcipher(int size, char *varEncript)
+static int test_skcipher(int size, char *varEncript, char option)
 {
 
 int q=0;
@@ -287,8 +287,16 @@ while(w<strlen(varEncript)){printk(KERN_INFO "Valor de valor de VARENCRIPT: %c",
     skcipher_request_set_crypt(req, &sk.sg, &sk.sg, 16, ivdata);
     init_completion(&sk.result.completion);
 
-    /* encrypt data */
+
+	if(option == 'e'){
+	/* encrypt data */
     ret = test_skcipher_encdec(&sk, 1);//1 encripta 0 desencripta
+}
+	if(option == 'd'){
+/* encrypt data */
+    ret = test_skcipher_encdec(&sk, 0);//1 encripta 0 desencripta
+}
+    
     if (ret)
         goto out;
     char *resultdata = sg_virt(&sk.sg);
@@ -309,7 +317,7 @@ out:
         vfree(scratchpad);
     return ret;
 }
-//////FIM DA ENCRIPTATION////////////////////////////////////////////////////////////////////////////////////
+//////FIM DA ENCRIPTATION/////////////////////////////////////////////
 
 
 /** @brief This function is called whenever device is being read from user space i.e. data is
@@ -321,48 +329,14 @@ out:
  *  @param offset The offset if required
  */
 
-/*
-static char complete_with_zero(char* var){
-	char dest[17]={"0000000000000000"};
-	//strcpy(dest, "0000000000000000");
-	memcpy(dest, var, strlen(var));
-	printk(KERN_INFO "-------------------: %s", complete);
-	
-	return dest;
-}*/
-
-
-
 
 static ssize_t dev_read(struct file *filep, char *buffer, size_t len, loff_t *offset){
-
-//char dest[32];//vetor de 0 preenchido
-//char complete;//vetor para receber a variavel completa com 0
-
-/*int w=0;
-while(w<16){
-printk(KERN_INFO "////////////////////////: %x ---", buffer);
-w++;
-}*/
 
 
 int error_count = 0;
    // copy_to_user has the format ( * to, *from, size) and returns 0 on success
    error_count = copy_to_user(buffer, message, size_of_message);
 
-//*************************************************************************************************	
-	//strcpy(dest, "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0");
-/*
-converterToString(buffer, dest);
-		
-		printk(KERN_INFO "-------------------: %s---", dest);
-	print_hex_dump(KERN_DEBUG, "AAA:", DUMP_PREFIX_NONE, 16,1, dest, 16, true);
-
-	//memcpy(dest, buffer+2, strlen(buffer)-2);
-//complete = complete_with_zero(buffer+2);
-
-	printk(KERN_INFO "XXXXXXXXXXXXXXXXXXXXXX: %d", strlen(buffer)-2);*/
-//*************************************************************************************************	
 
      //int a = test_skcipher(16, dest);//A soma de 2 eh por conta do espaco vazio e tbm da primeira posicao ser a de escolha
 
@@ -376,62 +350,7 @@ converterToString(buffer, dest);
    }
 }
 
-/************************************/
-/*converter para string*/
-/*static void converterToString(char *hex,  char *string){
-int len;
 
-  //char string[32];
-  
-  // Convert the hex back to a string.
-  len = strlen(hex);
-  int i = 0, j=0;
-
-  while(j < len) {
-    int val[1];
-    sscanf(hex + j, "%2x", val);
-    string[i] = val[0];
-    string[i + 1] = '\0';
-    i++;
-j += 2;
-  }
-	printk(KERN_INFO " ");
-  printk(KERN_INFO "%s as a string is '%s'.\n", hex, string);
-
-}
-*/
-/*
-static void conv(char* vet, char * resul){
-int    calc=0;
-    int j=0;
-    int i=0;
-    while(i<32)
-    {
-        if(vet[i]>96)
-        {
-            calc+=(vet[i]-87)*16;
-        }
-        else
-        {
-            calc+=(vet[i]-48)*16;
-        }
-
-                if(vet[i+1]>96)
-        {
-            calc+=(vet[i+1]-87);
-        }
-        else
-        {
-            calc+=(vet[i+1]-48);
-        }
-        resul[j]=calc;
-        calc=0;
-        j++;
-        i+=2;
-    }
-resul[j]='\0';
-
-}*/
 
 static void hex_to_string(char *hex, char *text){
 
@@ -448,31 +367,30 @@ static void hex_to_string(char *hex, char *text){
     text[j] = 0;   
 }
 
-/*****************************************/
+
 static ssize_t dev_write(struct file *filep, const char *buffer, size_t len, loff_t *offset){
      
 char valor[32];
 char string[32];
+char option = buffer[0];
 
 printk(KERN_INFO "O testeee");
-int w=0;
+int w=2;
+int pos=0;
 
 
 //strcpy(valor, buffer);
-while(w<strlen(buffer)){printk(KERN_INFO "Valor: %c", buffer[w]); valor[w]=buffer[w]; w++;}
+while(w<strlen(buffer)){printk(KERN_INFO "Valor: %c", buffer[w]); valor[pos]=buffer[w]; w++; pos++;}
 w=0;
-while(w<strlen(buffer)){printk(KERN_INFO "Valor de valor: %c", valor[w]); w++;}
-//printk(KERN_INFO "XXXXXXXXXXXXXX %s", valor);
-//converterToString(valor, string);
-//w=0;
+while(w<strlen(buffer)-2){printk(KERN_INFO "Valor de valor: %c", valor[w]); w++;}
 
-hex_to_string(buffer, string);
+hex_to_string(buffer+2, string);
 
 w=0;
 while(w<16){printk(KERN_INFO "CONVERTIDO: %c", string[w]); w++;}
 printk(KERN_INFO "FORAAAAAAAAAA");
 
-int a = test_skcipher(16, string);//
+int a = test_skcipher(16, string, option);//
   
    sprintf(message, "%s(%zu letters) %s", buffer, len, valor);   // appending received string with its length
    size_of_message = strlen(message);                 // store the length of the stored message

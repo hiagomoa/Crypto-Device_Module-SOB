@@ -21,37 +21,6 @@
 #define BUFFER_LENGTH 16               ///< The buffer length (crude but fine)
 static char receive[BUFFER_LENGTH];     ///< The receive buffer from the LKM
 
-/*static void converte(char *str, char *strH)
-{
-    int i,j;
-   
-    memset(strH,0,sizeof(strH));
-     
-
-    for(i=0,j=0;i<strlen(str);i++,j+=2){ 
-         ((char*)strH+j,"%02X",str[i]);
-    }
-    strH[j]='\0';
-	printf("Hexadecimal converted string is: \n");
-
-    printf("%s\n",strH);  
-    
-}*/
-/*
-int toString(unsigned char n)
-{
-
-if(n>9)
-{
-n+=87;
-
-}
-else
-{
-n+=48;
-}
-return n;
-}*/
 
 void convert_hexa(char* input, char* output){
    int loop=0;
@@ -72,7 +41,7 @@ int i=0;
 	for(i=tam; i<16; i++){
 	  str[i]='0';
    }
-	str[17]='\0';
+	str[16]='\0';
 
 }
 
@@ -81,6 +50,7 @@ int main(){
    char stringToSend[BUFFER_LENGTH];
 char valor[32];
 char convertido[33];
+char nova[33];
    //printf("Starting device test code example...\n");
    fd = open("/dev/ebbchar", O_RDWR);             // Open the device with read/write access
    if (fd < 0){
@@ -96,33 +66,28 @@ char convertido[33];
    scanf("%[^\n]%*c", stringToSend);              // Read in a string (with spaces)
    printf("Writing message to the device [%s].\n", stringToSend);
 
+if(stringToSend[0] == 'e'){
 	int a=0;
-	for(int i=2;i<strlen(stringToSend); i++){
+	for(int i=2;i<=strlen(stringToSend); i++){
 	valor[a]=stringToSend[i];
 	a++;
 	}
 
- 	
-
+	
 	preencher(valor, strlen(valor));
 
 	printf("ASSSSSSSS: %s------", valor);
 
 	int i=0 ,j = 0;
-	/*while(i < 16)
-	{
-
-	convertido[j]=toString((unsigned char )valor[i]/16);
-	j++;
-	convertido[j]=toString((unsigned char )valor[i]%16);
-	j++;
-	i++;
-	}
-	convertido[j]='\0';*/
 	convert_hexa(valor, convertido);
 	printf("\n Valor em hexa: %s---------\n", convertido);
+	sprintf(nova,"%c %s", stringToSend[0], convertido);
+	printf("\n TUUUUUDDOOOOOOOO: %s---------\n", nova);
 	
-   ret = write(fd, convertido, strlen(convertido)); // Send the string to the LKM
+   ret = write(fd, nova, strlen(convertido)); // Send the string to the LKM
+}else{
+   ret = write(fd, stringToSend, strlen(stringToSend)); // Send the string to the LKM
+}
    if (ret < 0){
       perror("Failed to write the message to the device.");
       return errno;
